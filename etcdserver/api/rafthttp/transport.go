@@ -33,9 +33,13 @@ import (
 )
 
 type Raft interface {
+	// 将指定的消息实例传递到底层etcd-raft模块进行处理
 	Process(ctx context.Context, m raftpb.Message) error
+	// 检测指定节点是否从当前集群中移除
 	IsIDRemoved(id uint64) bool
+	// 通知底层etcd-raft模块，当前节点与指定节点无法联通
 	ReportUnreachable(id uint64)
+	// 通知底层etcd-raft模块，快照数据是否发送成功
 	ReportSnapshot(id uint64, status raft.SnapshotStatus)
 }
 

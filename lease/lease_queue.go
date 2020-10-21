@@ -62,7 +62,7 @@ func (pq *LeaseQueue) Pop() interface{} {
 // Only save one item for a lease, `Register` will update time of the corresponding lease.
 type LeaseExpiredNotifier struct {
 	m     map[LeaseID]*LeaseWithTime
-	queue LeaseQueue
+	queue LeaseQueue  // 小顶堆
 }
 
 func newLeaseExpiredNotifier() *LeaseExpiredNotifier {

@@ -22,6 +22,7 @@ import (
 
 // stoppableListener sets TCP keep-alive timeouts on accepted
 // connections and waits on stopc message
+// 包装net.TCPListener
 type stoppableListener struct {
 	*net.TCPListener
 	stopc <-chan struct{}
@@ -44,14 +45,14 @@ func (ln stoppableListener) Accept() (c net.Conn, err error) {
 			errc <- err
 			return
 		}
-		connc <- tc
+		connc <- tc // 接受到新的链接传递到connc通道中
 	}()
 	select {
-	case <-ln.stopc:
+	case <-ln.stopc: // 停止通知
 		return nil, errors.New("server stopped")
-	case err := <-errc:
+	case err := <-errc: // 如果在接收中出现异常，则抛出
 		return nil, err
-	case tc := <-connc:
+	case tc := <-connc: // 取出链接，设置keepalive属性
 		tc.SetKeepAlive(true)
 		tc.SetKeepAlivePeriod(3 * time.Minute)
 		return tc, nil

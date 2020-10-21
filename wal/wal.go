@@ -91,6 +91,7 @@ type WAL struct {
 	enti    uint64   // index of the last entry saved to the wal
 	encoder *encoder // encoder to encode records
 
+	// 当前正在使用的文件
 	locks []*fileutil.LockedFile // the locked files the WAL holds (the name is increasing)
 	fp    *filePipeline
 }
@@ -705,9 +706,11 @@ func (w *WAL) cut() error {
 		return err
 	}
 
+	//文件名 seq+index
 	fpath := filepath.Join(w.dir, walName(w.seq()+1, w.enti+1))
 
 	// create a temp wal file with name sequence + 1, or truncate the existing one
+	// 创建新文件
 	newTail, err := w.fp.Open()
 	if err != nil {
 		return err
@@ -784,6 +787,7 @@ func (w *WAL) sync() error {
 		}
 	}
 	start := time.Now()
+	// 刷盘
 	err := fileutil.Fdatasync(w.tail().File)
 
 	took := time.Since(start)
@@ -794,6 +798,7 @@ func (w *WAL) sync() error {
 			zap.Duration("expected-duration", warnSyncDuration),
 		)
 	}
+	// 监控
 	walFsyncSec.Observe(took.Seconds())
 
 	return err
@@ -884,7 +889,7 @@ func (w *WAL) saveEntry(e *raftpb.Entry) error {
 	if err := w.encoder.encode(rec); err != nil {
 		return err
 	}
-	w.enti = e.Index
+	w.enti = e.Index  // 更新最后一条entry的index
 	return nil
 }
 
@@ -898,6 +903,23 @@ func (w *WAL) saveState(s *raftpb.HardState) error {
 	return w.encoder.encode(rec)
 }
 
+/*
+type Entry struct {
+	Type        int32   // 只有两种一种是0表示Normal，1表示ConfChange(ConfChange表示 Etcd 本身的配置变更同步，比如有新的节点加入等)。
+	Term        uint64  // 每个term代表一个主节点的任期，每次主节点变更term就会变化。
+	Index       uint64  //  严格有序递增的，代表变更序号
+	Data        []byte  // 二进制的data，将raft request对象的pb结构整个保存下
+}
+
+type Record struct {
+	Type      int64
+	Crc       uint32
+	Data      []byte
+}
+
+wal = 多条record
+record = type + crc + entry
+*/
 func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -910,11 +932,13 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 	mustSync := raft.MustSync(st, w.state, len(ents))
 
 	// TODO(xiangli): no more reference operator
+	// 保存每一条entry信息
 	for i := range ents {
 		if err := w.saveEntry(&ents[i]); err != nil {
 			return err
 		}
 	}
+	// 将操作的term, vote, commit记录下来
 	if err := w.saveState(&st); err != nil {
 		return err
 	}
@@ -929,7 +953,7 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 		}
 		return nil
 	}
-
+	// 如果文件超过64M，就进行裁剪
 	return w.cut()
 }
 
@@ -962,6 +986,8 @@ func (w *WAL) tail() *fileutil.LockedFile {
 }
 
 func (w *WAL) seq() uint64 {
+	// 生成seq
+
 	t := w.tail()
 	if t == nil {
 		return 0

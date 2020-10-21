@@ -150,6 +150,8 @@ type lessor struct {
 	demotec chan struct{}
 
 	leaseMap             map[LeaseID]*Lease
+
+	// 超时失效
 	leaseExpiredNotifier *LeaseExpiredNotifier
 	leaseCheckpointHeap  LeaseQueue
 	itemMap              map[LeaseItem]LeaseID
@@ -222,6 +224,7 @@ func newLessor(lg *zap.Logger, b backend.Backend, cfg LessorConfig, ci cindex.Co
 	}
 	l.initAndRecover()
 
+	// 失效检测
 	go l.runLoop()
 
 	return l
@@ -589,6 +592,7 @@ func (le *lessor) Stop() {
 }
 
 func (le *lessor) runLoop() {
+	// 每500ms进行一次检测
 	defer close(le.doneC)
 
 	for {
@@ -613,6 +617,7 @@ func (le *lessor) revokeExpiredLeases() {
 
 	le.mu.RLock()
 	if le.isPrimary() {
+		// 查找失效的lease
 		ls = le.findExpiredLeases(revokeLimit)
 	}
 	le.mu.RUnlock()
@@ -621,7 +626,7 @@ func (le *lessor) revokeExpiredLeases() {
 		select {
 		case <-le.stopC:
 			return
-		case le.expiredC <- ls:
+		case le.expiredC <- ls: // 如果存在，则放入到expiredC中
 		default:
 			// the receiver of expiredC is probably busy handling
 			// other stuff
