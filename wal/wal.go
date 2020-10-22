@@ -73,15 +73,21 @@ var (
 type WAL struct {
 	lg *zap.Logger
 
-	dir string // the living directory of the underlay files
+	// 存放wal日志文件的目录路径
+	dir string
 
-	// dirFile is a fd for the wal directory for syncing on Rename
+	// 根据dir路径创建的file实例
 	dirFile *os.File
 
-	metadata []byte           // metadata recorded at the head of each WAL
-	state    raftpb.HardState // hardstate recorded at the head of WAL
+	// 每个wal日志文件的头部，都会写入metadata元数据
+	metadata []byte
+	// wal日志记录追加是批量的，每次写入entryType类型的日志之后，都会追加一条stateType类型的日志记录
+	// hardstate记录当前的term, 当前节点的投票结果和已提交日志的位置
+	state    raftpb.HardState
 
-	start     walpb.Snapshot // snapshot to start reading
+	// 从快照的指定位置开始读取
+	// walpb.Snapshot中的Index记录了
+	start     walpb.Snapshot
 	decoder   *decoder       // decoder to decode records
 	readClose func() error   // closer for decode reader
 
