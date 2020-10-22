@@ -252,33 +252,34 @@ func (c *Config) validate() error {
 }
 
 type raft struct {
-	id uint64
+	id uint64 // 当前节点在集群中的ID
 
-	Term uint64
-	Vote uint64
+	Term uint64 // 当前任期号
+	Vote uint64 //当前任期中当前节点将选票投给了哪个节点，未投票时，该字段为None
 
 	readStates []ReadState
 
 	// the log
-	raftLog *raftLog
+	raftLog *raftLog // 每个节点都会记录本地Log
 
-	maxMsgSize         uint64
+	maxMsgSize         uint64 //单条消息的最大字节数
 	maxUncommittedSize uint64
 	// TODO(tbg): rename to trk.
 	prs tracker.ProgressTracker
 
-	state StateType
+	state StateType // 当前节点在集群中的角色，follower, candidate, leader, precandidate
 
 	// isLearner is true if the local raft node is a learner.
 	isLearner bool
 
+	// 缓存了当前节点等待发送的消息
 	msgs []pb.Message
 
 	// the leader id
-	lead uint64
+	lead uint64 // 当前集群中leader 节点的ID
 	// leadTransferee is id of the leader transfer target when its value is not zero.
 	// Follow the procedure defined in raft thesis 3.10.
-	leadTransferee uint64
+	leadTransferee uint64 // 用于集群中leader节点的转移，该值记录了此次leader角色转移的目标节点ID
 	// Only one conf change may be pending (in the log, but not yet
 	// applied) at a time. This is enforced via pendingConfIndex, which
 	// is set to a value >= the log index of the latest pending
@@ -291,30 +292,55 @@ type raft struct {
 	// term changes.
 	uncommittedSize uint64
 
+	// 与只读请求相关
 	readOnly *readOnly
 
 	// number of ticks since it reached last electionTimeout when it is leader
 	// or candidate.
 	// number of ticks since it reached last electionTimeout or received a
 	// valid message from current leader when it is a follower.
-	electionElapsed int
+	electionElapsed int // 选举计时器的指针，逻辑时钟每推进一次，该字段就会增加1
 
 	// number of ticks since it reached last heartbeatTimeout.
 	// only leader keeps heartbeatElapsed.
-	heartbeatElapsed int
+	heartbeatElapsed int // 心跳计时器的指针，逻辑时钟每推进一次，该字段就会增加1
 
+
+	// 脑裂的解决方案
+	// leader节点只有在收到更大term值的消息时，才会切换成follower状态。
+	// 在发送网络分区时，即使在其他分区里新的leader节点已经被选举出来，旧的leader节点由于接收不到
+	// 新leader节点的心跳消息，依然会认为自己是当前集群的leader节点，它依然会接收客户端的请求，但无法
+	// 向客户端返回任何响应。checkQuorum机制是：每隔一段时间，leader节点会尝试连接集群中的其他节点（发送心跳消息）
+	// 如果发现自己可以连接到节点个数没有超过半数，则主动切换成follower状态。这样在上述网络分区的场景中，
+	// 旧的leader节点可以很快知道自己过期，可以减少client连接旧leader节点的等待时间。
 	checkQuorum bool
+
+	// follower节点在选举计时器超时之后，会切换成candidate状态并发起选举
+	// follower节点超时没有收到心跳消息时，可能是follower节点自身的网络问题导致的
+	// 例如，网络分区场景。follower节点还是会不断的发起选举，其term值也会不断递增。
+	// 待该follower节点的网络故障恢复并收到leader节点的心跳消息时，由于其term值已经增加，该follower节点会丢弃term值比自身小的心跳消息
+	// 之后就会触发一次没有必要进行的leader选举。prevote就是针对上面的优化。
+	// 当follower节点准备发起一次选举之前，会先连接集群中的其他节点，并询问它们是否愿意参与选举，如果集群中的其他节点能够正常收到leader节点
+	// 的心跳消息，则会拒绝参与选举，反之则参与选举。当在preVote过程中，有超过半数的节点响应并参与新一轮选举，则可以发起新一轮的选举。
 	preVote     bool
 
-	heartbeatTimeout int
-	electionTimeout  int
+	heartbeatTimeout int // 心跳超时时间，当heartbeatElapsed值达到该值，就会触发leader节点发送一条心跳消息
+	electionTimeout  int // 选举超时时间，当electionElapsed值达到该值，就会触发新一轮的选举
 	// randomizedElectionTimeout is a random number between
 	// [electiontimeout, 2 * electiontimeout - 1]. It gets reset
 	// when raft changes its state to follower or candidate.
+	// [electiontimeout, 2 * electiontimeout - 1]随机值
+	// 选举计时器的上限，当electiontimeout超过randomizedElectionTimeout即视为超时
 	randomizedElectionTimeout int
 	disableProposalForwarding bool
 
+	// 当前节点推进逻辑时钟的处理函数。如果当前节点是leader节点，则指向raft.tickHeartbeat()函数
+	// 如果当前节点是follower或者candidate，则指向raft.tickElection()函数
 	tick func()
+
+	// 当前节点收到消息时的处理函数。如果是leader节点，则该字段指向stepLeader函数
+	// 如果是follower节点，该字段指向stepFollower函数
+	// 如果处于preVote阶段的节点或者是candidate节点，则该字段指向stepCandidate函数
 	step stepFunc
 
 	logger Logger

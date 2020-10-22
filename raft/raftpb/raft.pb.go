@@ -261,10 +261,16 @@ func (ConfChangeType) EnumDescriptor() ([]byte, []int) {
 	return fileDescriptor_b042552c306ae59b, []int{3}
 }
 
+// Entry记录: 节点之间传递的是消息Message, 每条消息中可以携带多条Entry记录
+// 每条Entry记录对应一个独立的操作
 type Entry struct {
+	// 任期号
 	Term                 uint64    `protobuf:"varint,2,opt,name=Term" json:"Term"`
+	// Entry对应的索引号
 	Index                uint64    `protobuf:"varint,3,opt,name=Index" json:"Index"`
+	// 记录Entry的类型, 一个是EntryNormal，表示普通数据操作; 一个是EntryConfChange, 表示集群的变更操作
 	Type                 EntryType `protobuf:"varint,1,opt,name=Type,enum=raftpb.EntryType" json:"Type"`
+	// 操作的具体数据
 	Data                 []byte    `protobuf:"bytes,4,opt,name=Data" json:"Data,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}  `json:"-"`
 	XXX_unrecognized     []byte    `json:"-"`
@@ -387,17 +393,31 @@ func (m *Snapshot) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_Snapshot proto.InternalMessageInfo
 
+// 所有消息的抽象，包括各种类型消息所需要的字段
 type Message struct {
+	// 消息类型, 定义消息的类型，通过这个字段区分不同的消息进行分类处理，共有19种类型
 	Type                 MessageType `protobuf:"varint,1,opt,name=type,enum=raftpb.MessageType" json:"type"`
+	// 消息的目标节点ID
 	To                   uint64      `protobuf:"varint,2,opt,name=to" json:"to"`
+	// 发送消息的节点ID。在集群种，每个节点都拥有一个唯一ID作为标示
 	From                 uint64      `protobuf:"varint,3,opt,name=from" json:"from"`
+	// 发送消息的节点的Term值。如果Term值为0，则为本地消息
 	Term                 uint64      `protobuf:"varint,4,opt,name=term" json:"term"`
+	// 该消息携带的第一条Entry记录的Term
 	LogTerm              uint64      `protobuf:"varint,5,opt,name=logTerm" json:"logTerm"`
+	// 记录了一个索引值
 	Index                uint64      `protobuf:"varint,6,opt,name=index" json:"index"`
+	// 如果是MsgApp类型的消息，则该字段中保存了leader节点复制到follower节点的entry记录
 	Entries              []Entry     `protobuf:"bytes,7,rep,name=entries" json:"entries"`
+	// 消息发送节点的提交位置
 	Commit               uint64      `protobuf:"varint,8,opt,name=commit" json:"commit"`
+	// 在传输快照时，该字段保存了快照数据
 	Snapshot             Snapshot    `protobuf:"bytes,9,opt,name=snapshot" json:"snapshot"`
+	// 主要用于响应类型的消息，表示是否拒绝收到的消息。如果follower节点收到leader节点发来的msgApp消息，
+	// 如果follower节点发现msgapp消息携带的entry记录并不能直接追加到本地的raftLog中，则会将响应消息的Reject字段设置为true,
+	// 并且会在RejectHint字段中记录合适的Entry索引值，供Leader节点参考。
 	Reject               bool        `protobuf:"varint,10,opt,name=reject" json:"reject"`
+	// 在follower节点拒绝leader节点的消息之后，会在该字段记录一个entry索引值供leader节点。
 	RejectHint           uint64      `protobuf:"varint,11,opt,name=rejectHint" json:"rejectHint"`
 	Context              []byte      `protobuf:"bytes,12,opt,name=context" json:"context,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}    `json:"-"`
